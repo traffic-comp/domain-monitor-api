@@ -19,6 +19,7 @@
     "express": "^5.1.0",
     "express-http-proxy": "^2.1.1",
     "https-proxy-agent": "^7.0.6",
+    "mongoose": "^8.17.1",
     "p-limit": "^6.2.0",
     "ping": "^0.4.4",
     "playwright": "^1.54.2",

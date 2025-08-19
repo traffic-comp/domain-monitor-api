@@ -2,7 +2,9 @@ import express from "express";
 import domainRoutes from "./routes/domainRoutes.js";
 import cloudflareRoutes from "./routes/cloudflareRoutes.js";
 import balanserRoutes from "./routes/balanserRoutes.js";
+import proxyRoutes from "./routes/proxyRoutes.js";
 import cors from "cors";
+import mongoose from "mongoose";
 
 const app = express();
 const PORT = 3000;
@@ -13,7 +15,14 @@ app.use(cors());
 app.use("/domains", domainRoutes);
 app.use("/cloudflare", cloudflareRoutes);
 app.use("/balanser", balanserRoutes);
+app.use("/proxy", proxyRoutes);
 
+
+
+mongoose
+  .connect(process.env.MOGO_URI, {})
+  .then(() => console.log("MongoDB connected"))
+  .catch((err) => console.error("MongoDB connection error:", err));
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
