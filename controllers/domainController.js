@@ -46,7 +46,7 @@ export const setActive = async (req, res) => {
     }
 
     const updatedDoc = await domainModel.findOneAndUpdate(
-      { _id: '68a45c20bb03db36d2c64a7a' },
+      { _id: MODEL_ID },
       { $pull: { domains: domain }, $addToSet: { activeDomains: domain } },
       { new: true }
     );
@@ -69,7 +69,7 @@ export const deactivate = async (req, res) => {
     }
 
     const updatedDoc = await domainModel.findOneAndUpdate(
-      { _id: '68a45c20bb03db36d2c64a7a' },
+      { _id: MODEL_ID },
       { $addToSet: { domains: domain }, $pull: { activeDomains: domain } },
       { new: true }
     );
@@ -92,8 +92,8 @@ export const deleteDomain = async (req, res) => {
     }
 
     const updatedDoc = await domainModel.findOneAndUpdate(
-      { _id: '68a45c20bb03db36d2c64a7a' },
-      { $pull: { domains: domain }, $pull: { activeDomains: domain } },
+      { _id: MODEL_ID },
+      { $pull: { domains: domain, activeDomains: domain } },
       { new: true }
     );
 
