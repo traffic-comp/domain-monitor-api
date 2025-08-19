@@ -1,20 +1,18 @@
-import express from "express";
+import express from 'express';
 import {
-  checkBalansers,
-  checkDomainViaProxy,
-  checkReestrDomains,
-  checkReestrIps,
-  runChecks,
-  scrapSites,
-} from "../controllers/domainController.js";
+  deactivate,
+  deleteDomain,
+  getDomain,
+  setActive,
+  setDomain,
+} from '../controllers/domainController.js';
 
 const router = express.Router();
 
-router.post("/check-domain", runChecks);
-router.post("/check-links", checkDomainViaProxy);
-router.post("/check-balancers", checkBalansers);
-router.post("/scrap-sites", scrapSites);
-router.post("/reestr-domains", checkReestrDomains);
-router.post("/reestr-ips", checkReestrIps);
+router.get('/get', getDomain);
+router.post('/set', setDomain);
+router.post('/set-active', setActive);
+router.post('/deactivate', deactivate);
+router.delete('/delete', deleteDomain);
 
 export default router;

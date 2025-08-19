@@ -3,6 +3,7 @@ import domainRoutes from "./routes/domainRoutes.js";
 import cloudflareRoutes from "./routes/cloudflareRoutes.js";
 import balanserRoutes from "./routes/balanserRoutes.js";
 import proxyRoutes from "./routes/proxyRoutes.js";
+import checkRoutes from "./routes/checkRoutes.js";
 import cors from "cors";
 import mongoose from "mongoose";
 
@@ -12,7 +13,8 @@ const PORT = 3000;
 app.use(express.json());
 app.use(cors());
 
-app.use("/domains", domainRoutes);
+app.use("/domain", domainRoutes);
+app.use("/check", checkRoutes);
 app.use("/cloudflare", cloudflareRoutes);
 app.use("/balanser", balanserRoutes);
 app.use("/proxy", proxyRoutes);

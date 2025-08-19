@@ -1,5 +1,22 @@
 import proxyModel from '../models/proxyModel.js';
 
+export const getProxy = async (req, res) => {
+  try {
+    const proxies = await proxyModel.find();
+
+    if (!proxies.length) {
+      return res.status(404).json({
+        error: 'Прокси не найдены!',
+      });
+    }
+
+    res.status(200).json(proxies);
+  } catch (err) {
+    console.error('[setProxy] Ошибка:', err);
+    return res.status(500).json({ error: 'Ошибка при добавлении прокси' });
+  }
+};
+
 export const updateProxy = async (req, res) => {
   try {
     /**
