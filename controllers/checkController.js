@@ -1,19 +1,19 @@
-import puppeteer from 'puppeteer';
-import ping from 'ping';
-import dns from 'dns/promises';
+import puppeteer from "puppeteer";
+import ping from "ping";
+import dns from "dns/promises";
 
-import sharp from 'sharp';
-import proxyModel from '../models/proxyModel.js';
+import sharp from "sharp";
+import proxyModel from "../models/proxyModel.js";
 import {
   checkBalancer,
   checkDomainInfo,
   checkPort,
   checkProxyCurl,
   checkSSL,
-} from '../utils/domainUtils.js';
-import domainModel from '../models/domainModel.js';
+} from "../utils/domainUtils.js";
+import domainModel from "../models/domainModel.js";
 
-const MODEL_ID = '68a45c20bb03db36d2c64a7a';
+const MODEL_ID = "68a45c20bb03db36d2c64a7a";
 
 // --- Роут 1: проверка доменов по массиву доменов domain ---
 export async function runChecks(req, res) {
@@ -21,13 +21,13 @@ export async function runChecks(req, res) {
   if (!domains || !Array.isArray(domains) || domains.length === 0) {
     return res
       .status(400)
-      .json({ error: 'Нужно передать domains — массив доменов или URL' });
+      .json({ error: "Нужно передать domains — массив доменов или URL" });
   }
 
   const results = [];
 
   for (const domainInput of domains) {
-    const domainOnly = domainInput.replace(/^https?:\/\//, '').split('/')[0];
+    const domainOnly = domainInput.replace(/^https?:\/\//, "").split("/")[0];
 
     // определяем IP балансера (A-запись)
     let balancerIP = null;
@@ -44,7 +44,7 @@ export async function runChecks(req, res) {
       const timeout = setTimeout(() => controller.abort(), 3000);
 
       const response = await fetch(`http://${domainOnly}`, {
-        method: 'GET',
+        method: "GET",
         signal: controller.signal,
       });
 
@@ -103,7 +103,7 @@ export async function runChecks(req, res) {
     results.push({
       fullUrl: domainInput,
       domain: domainOnly,
-      ip: ip || 'Не найден',
+      ip: ip || "Не найден",
       sslInfo,
       ns: nsList,
       balancerPing,
@@ -117,34 +117,68 @@ export async function runChecks(req, res) {
   console.log(results);
   res.json(results);
 }
+
 export const setStability = async (type, domainName, proxyName) => {
   try {
-    const doc = await domainModel.findOne({
-      'activeDomains.domain': domainName,
-    });
-    if (!doc) return { error: 'Домен не найден' };
+    // ищем домен
+    let doc = await domainModel.findOne({ domain: domainName });
 
-    const domainItem = doc.activeDomains.find((d) => d.domain === domainName);
-
-    if (!domainItem.stability) domainItem.stability = [];
-
-    let proxyStat = domainItem.stability.find((s) => s.proxyName === proxyName);
-    if (!proxyStat) {
-      proxyStat = { proxyName, attempts: 0, success: 0, failed: 0, stats: 0 };
-      domainItem.stability.push(proxyStat);
+    // если домена нет — создаём
+    if (!doc) {
+      doc = new Domain({
+        domain: domainName,
+        stability: [],
+      });
     }
 
-    proxyStat.attempts++;
-    if (type === 'increase') proxyStat.success++;
-    if (type === 'decrease') proxyStat.failed++;
+    // ищем прокси статистику
+    let proxyStat = doc.stability.find((s) => s.proxyName === proxyName);
+    if (!proxyStat) {
+      proxyStat = {
+        proxyName,
+        attempts: 0,
+        success: 0,
+        failed: 0,
+        stats: 0,
+        checks: [],
+      };
+      doc.stability.push(proxyStat);
+    }
 
-    proxyStat.stats =
+    // увеличиваем попытки
+    proxyStat.attempts++;
+    if (type === "increase") proxyStat.success++;
+    if (type === "decrease") proxyStat.failed++;
+
+    // новый процент успеха
+    const newStats =
       proxyStat.attempts > 0
         ? (proxyStat.success / proxyStat.attempts) * 100
         : 0;
 
-    doc.markModified('activeDomains');
+    // предыдущий процент успеха
+    const prevStats =
+      proxyStat.checks.length > 0
+        ? proxyStat.checks[proxyStat.checks.length - 1].statsAfter
+        : 0;
 
+    // разница
+    const diff = newStats.toFixed() - prevStats.toFixed();
+
+    // обновляем stats
+    proxyStat.stats = newStats.toFixed();
+
+    // добавляем запись в историю
+    proxyStat.checks.push({
+      result: type === "increase" ? "success" : "failed",
+      statsAfter: newStats,
+      diff,
+    });
+
+    // говорим mongoose что массив изменился
+    doc.markModified("stability");
+
+    // сохраняем
     await doc.save();
     return proxyStat;
   } catch (err) {
@@ -159,22 +193,20 @@ export async function checkDomainViaProxy(req, res) {
 
   // Если siteUrls не передан или пустой
   if (!siteUrls || !Array.isArray(siteUrls) || siteUrls.length === 0) {
-    const domainsList = await domainModel.findOne({ _id: MODEL_ID });
+    const domainsList = await domainModel.find();
 
-    if (
-      !domainsList ||
-      !domainsList.activeDomains ||
-      domainsList.activeDomains.length === 0
-    ) {
+    if (!domainsList || !domainsList || domainsList.length === 0) {
       // Если активных доменов тоже нет — кидаем ошибку
-      return res.status(400).json({ error: 'Нет доменов для проверки' });
+      return res.status(400).json({ error: "Нет доменов для проверки" });
     }
 
+    console.log(domainsList)
+
     // Используем активные домены
-    siteUrls = domainsList.activeDomains.map((d) => d.domain);
+    siteUrls = domainsList.map((d) => d.domain);
   }
 
-  const proxies = await proxyModel.find({ type: 'http' });
+  const proxies = await proxyModel.find({ type: "http" });
   const results = {};
 
   for (const siteUrl of siteUrls) {
@@ -191,7 +223,7 @@ export async function checkDomainViaProxy(req, res) {
       const proxyResult = await checkProxyCurl(siteUrl, proxyObj);
 
       await setStability(
-        proxyResult.error ? 'decrease' : 'increase',
+        proxyResult.error ? "decrease" : "increase",
         siteUrl,
         proxyObj.proxyType
       );
@@ -209,7 +241,6 @@ export async function checkDomainViaProxy(req, res) {
 
   res.json(results);
 }
-
 // --- Роут 3: скрапинг сайтов с маркером через прокси ---
 export const scrapSites = async (req, res) => {
   try {
@@ -218,16 +249,16 @@ export const scrapSites = async (req, res) => {
     if (!siteUrls || !Array.isArray(siteUrls) || siteUrls.length === 0) {
       return res
         .status(400)
-        .json({ error: 'Нужно передать siteUrls — массив ссылок' });
+        .json({ error: "Нужно передать siteUrls — массив ссылок" });
     }
 
-    const proxies = await proxyModel.find({ type: 'socks5' });
+    const proxies = await proxyModel.find({ type: "socks5" });
     const results = [];
 
     for (const url of siteUrls) {
       for (const proxy of proxies) {
         const { proxyType, host, port, user, pass, type } = proxy;
-        if (type == 'socks5') {
+        if (type == "socks5") {
           console.log(`\n🌐 Проверяем ${url} через прокси: ${proxyType}`);
 
           const browser = await puppeteer.launch({
@@ -237,7 +268,7 @@ export const scrapSites = async (req, res) => {
 
           const page = await browser.newPage();
           await page.setUserAgent(
-            'Mozilla/5.0 (Linux; Android 15; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.187 Mobile Safari/537.36'
+            "Mozilla/5.0 (Linux; Android 15; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.187 Mobile Safari/537.36"
           );
           await page.setViewport({ width: 390, height: 844, isMobile: true });
 
@@ -255,15 +286,15 @@ export const scrapSites = async (req, res) => {
 
           try {
             await page.goto(`https://${url}`, {
-              waitUntil: 'load',
+              waitUntil: "load",
               timeout: 30000,
             });
-            siteResult.markerFound = (await page.$('#marker')) !== null;
+            siteResult.markerFound = (await page.$("#marker")) !== null;
 
             // Сжатый JPEG
             const screenshotBuffer = await page.screenshot({
               fullPage: false,
-              type: 'jpeg',
+              type: "jpeg",
               quality: 30,
             });
             const compressedBuffer = await sharp(screenshotBuffer)
@@ -271,7 +302,7 @@ export const scrapSites = async (req, res) => {
               .jpeg({ quality: 40 }) // дополнительное сжатие
               .toBuffer();
 
-            siteResult.screenshot = compressedBuffer.toString('base64');
+            siteResult.screenshot = compressedBuffer.toString("base64");
 
             console.log(
               siteResult.markerFound
@@ -286,7 +317,7 @@ export const scrapSites = async (req, res) => {
             );
           } finally {
             await browser.close();
-            console.log('Браузер закрыт\n');
+            console.log("Браузер закрыт\n");
           }
 
           results.push(siteResult);
@@ -296,8 +327,8 @@ export const scrapSites = async (req, res) => {
 
     return res.json(results);
   } catch (err) {
-    console.error('[scrapSites] Ошибка:', err);
-    return res.status(500).json({ error: 'Ошибка при скрапинге сайтов' });
+    console.error("[scrapSites] Ошибка:", err);
+    return res.status(500).json({ error: "Ошибка при скрапинге сайтов" });
   }
 };
 
@@ -309,7 +340,7 @@ export const checkReestrDomains = async (req, res) => {
     if (!domains || !Array.isArray(domains) || domains.length === 0) {
       return res
         .status(400)
-        .json({ error: 'Нужно передать domains — массив доменов' });
+        .json({ error: "Нужно передать domains — массив доменов" });
     }
 
     const result = {
@@ -318,7 +349,7 @@ export const checkReestrDomains = async (req, res) => {
     };
 
     const resopone = await fetch(
-      'https://reestr.rublacklist.net/api/v3/domains/'
+      "https://reestr.rublacklist.net/api/v3/domains/"
     );
 
     if (!resopone.ok) {
@@ -340,10 +371,10 @@ export const checkReestrDomains = async (req, res) => {
 
     res.status(200).json(result);
   } catch (err) {
-    console.error('[checkReestr] Ошибка:', err);
+    console.error("[checkReestr] Ошибка:", err);
     return res
       .status(500)
-      .json({ error: 'Ошибка при проверке реестра domain' });
+      .json({ error: "Ошибка при проверке реестра domain" });
   }
 };
 
@@ -355,7 +386,7 @@ export const checkReestrIps = async (req, res) => {
     if (!ips || !Array.isArray(ips) || ips.length === 0) {
       return res
         .status(400)
-        .json({ error: 'Нужно передать ips — массив IP-адресов' });
+        .json({ error: "Нужно передать ips — массив IP-адресов" });
     }
 
     const result = {
@@ -363,7 +394,7 @@ export const checkReestrIps = async (req, res) => {
       error: null,
     };
 
-    const resopone = await fetch('https://reestr.rublacklist.net/api/v3/ips/');
+    const resopone = await fetch("https://reestr.rublacklist.net/api/v3/ips/");
 
     if (!resopone.ok) {
       result.error = `Ошибка при обращении к реестру: ${res.status} ${res.statusText}`;
@@ -383,8 +414,8 @@ export const checkReestrIps = async (req, res) => {
 
     res.status(200).json(result);
   } catch (err) {
-    console.error('[checkReestr] Ошибка:', err);
-    return res.status(500).json({ error: 'Ошибка при проверке реестра ip' });
+    console.error("[checkReestr] Ошибка:", err);
+    return res.status(500).json({ error: "Ошибка при проверке реестра ip" });
   }
 };
 
@@ -396,7 +427,7 @@ export const checkBalansers = async (req, res) => {
     if (!ips || !Array.isArray(ips) || ips.length === 0) {
       return res
         .status(400)
-        .json({ error: 'Нужно передать ips — массив IP-адресов' });
+        .json({ error: "Нужно передать ips — массив IP-адресов" });
     }
 
     const results = await Promise.all(
@@ -410,7 +441,7 @@ export const checkBalansers = async (req, res) => {
     if (err instanceof TypeError) {
       return res.status(400).json({
         error:
-          'Неверный формат данных. Убедитесь, что передали массив IP-адресов.',
+          "Неверный формат данных. Убедитесь, что передали массив IP-адресов.",
       });
     }
   }

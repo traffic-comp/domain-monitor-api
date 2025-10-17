@@ -13,16 +13,16 @@ export const startCron = () => {
 
   cron.schedule('*/15 * * * *', () => {
     console.log('Проверка доменов каждые 15 минут 🚀');
-    chekLinks();
+    // chekLinks();
   });
   cron.schedule('*/15 * * * *', () => {
     console.log('Проверка прокси каждые 15 минут 🚀');
-    checkAllProxies();
+    // checkAllProxies();
   });
 
   cron.schedule('0 */3 * * *', () => {
     console.log('Проверка реестров каждые 3 часа 🚀');
-    checkReestr();
+    // checkReestr();
   });
 };
 
@@ -77,61 +77,66 @@ async function checkDomainViaProxy(siteUrls) {
   }
   console.log('checkDomainViaProxy --- finish');
 }
-const checkReestr = async () => {
-  const domains = await domainModel.findOne({ _id: MODEL_ID });
+export const checkReestr = async () => {
+  try {
+    console.log('🔍 Начинаем проверку реестра...');
 
-  const activeDomains = domains.activeDomains;
-
-  const resopone = await fetch(
-    'https://reestr.rublacklist.net/api/v3/domains/'
-  );
-
-  if (!resopone.ok) {
-    result.error = `Ошибка при обращении к реестру: ${res.status} ${res.statusText}`;
-    return res.status(500).json(result);
-  }
-  const data = await resopone.json();
-
-  if (data) {
-    for (const domain of activeDomains) {
-      const reestrDomains = data.find(
-        (reestrDomain) => reestrDomain === domain.domain
+    // --- Получаем все домены и балансеры ---
+    const domainDocs = await domainModel.find();
+    const balansers = await balanserModel.find();
+    console.log(balansers);
+    // --- Проверка доменов ---
+    const domainResponse = await fetch(
+      'https://reestr.rublacklist.net/api/v3/domains/'
+    );
+    if (!domainResponse.ok) {
+      console.error(
+        `❌ Ошибка при обращении к реестру доменов: ${domainResponse.status} ${domainResponse.statusText}`
       );
+      return;
+    }
+    const reestrDomains = await domainResponse.json();
 
-      if (reestrDomains) {
-        console.log(reestrDomains);
-        sendLogToChat(
+    for (const doc of domainDocs) {
+      const domains = doc.activeDomains || [];
+      for (const { domain } of domains) {
+        if (reestrDomains.includes(domain)) {
+          console.log(`🚫 Забанен домен: ${domain}`);
+          await sendLogToChat(
+            process.env.TG_TOKEN,
+            TELEGRAM_CHAT_ID,
+            `🚫 Забанен домен: ${domain}`
+          );
+        }
+      }
+    }
+
+    // --- Проверка IP ---
+    const ipResponse = await fetch(
+      'https://reestr.rublacklist.net/api/v3/ips/'
+    );
+    if (!ipResponse.ok) {
+      console.error(
+        `❌ Ошибка при обращении к реестру IP: ${ipResponse.status} ${ipResponse.statusText}`
+      );
+      return;
+    }
+    const reestrIps = await ipResponse.json();
+
+    for (const { ip } of balansers) {
+      if (reestrIps.includes(ip)) {
+        console.log(`🚫 Забанен IP: ${ip}`);
+        await sendLogToChat(
           process.env.TG_TOKEN,
-          '-1002801931976',
-          `Забанен ${reestrDomains}`
+          TELEGRAM_CHAT_ID,
+          `🚫 Забанен IP: ${ip}`
         );
       }
     }
-  }
 
-  const ips = await balanserModel.findOne({ _id: BALANCER_ID });
-
-  const balansers = ips.balansers;
-  const resoponeip = await fetch('https://reestr.rublacklist.net/api/v3/ips/');
-
-  if (!resoponeip.ok) {
-    result.error = `Ошибка при обращении к реестру: ${res.status} ${res.statusText}`;
-    return res.status(500).json(result);
-  }
-
-  const dataip = await resoponeip.json();
-
-  if (dataip) {
-    for (const ip of balansers) {
-      const reestrIps = dataip.find((reestrIp) => reestrIp === ip.ip);
-      if (reestrIps) {
-        sendLogToChat(
-          process.env.TG_TOKEN,
-          '-1002801931976',
-          `Забанен ${reestrIps}`
-        );
-      }
-    }
+    console.log('✅ Проверка реестра завершена успешно');
+  } catch (error) {
+    console.error('🔥 Ошибка при проверке реестра:', error);
   }
 };
 
@@ -163,28 +168,50 @@ const checkSingleProxy = (proxyObj) => {
       `--proxy ${proxy}`,
       '--connect-timeout 15',
       '--max-time 15',
-      '-s', // тихий режим
+      '-s',
       testUrl,
     ].join(' ');
 
     const startTime = Date.now();
 
-    exec(
-      curlCommand,
-      { maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        result.responseTimeMs = Date.now() - startTime;
+    try {
+      exec(
+        curlCommand,
+        { maxBuffer: 10 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          result.responseTimeMs = Date.now() - startTime;
 
-        if (err || !stdout) {
-          result.error = stderr || err?.message || 'No response';
-          return resolve(result);
+          if (err || !stdout) {
+            result.error = stderr || err?.message || 'No response';
+
+            // ⚠️ Отправляем лог только при ошибке проверки
+            sendLogToChat(
+              process.env.TG_TOKEN,
+              '-1002867546772',
+              `❌ Ошибка проверки прокси ${host}:${port}\n${result.error}`
+            );
+
+            return resolve(result);
+          }
+
+          result.success = true;
+          result.externalIp = stdout.trim();
+          resolve(result);
         }
+      );
+    } catch (e) {
+      result.responseTimeMs = Date.now() - startTime;
+      result.error = e.message || 'Unknown exec error';
 
-        result.success = true;
-        result.externalIp = stdout.trim(); // тут будет только IP
-        resolve(result);
-      }
-    );
+      // ⚠️ Логируем критическую ошибку
+      sendLogToChat(
+        process.env.TG_TOKEN,
+        '-1002867546772',
+        `❌ Критическая ошибка exec при проверке ${host}:${port}\n${result.error}`
+      );
+
+      return resolve(result);
+    }
   });
 };
 
@@ -193,7 +220,6 @@ const checkAllProxies = async () => {
 
   const results = await Promise.all(proxies.map((p) => checkSingleProxy(p)));
 
-  // Можно отдельно фильтровать рабочие и нерабочие
   const working = results.filter((r) => r.success);
   const failed = results.filter((r) => !r.success);
 
