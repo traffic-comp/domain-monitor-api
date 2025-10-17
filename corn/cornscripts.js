@@ -1,28 +1,25 @@
-import cron from 'node-cron';
-import domainModel from '../models/domainModel.js';
-import proxyModel from '../models/proxyModel.js';
-import { checkProxyCurl } from '../utils/domainUtils.js';
-import { setStability } from '../controllers/checkController.js';
-import balanserModel from '../models/balanserModel.js';
-import { exec } from 'child_process';
-const MODEL_ID = '68a45c20bb03db36d2c64a7a';
-const BALANCER_ID = '68a473c6235bcc27f3a494ba';
+import cron from "node-cron";
+import domainModel from "../models/domainModel.js";
+import proxyModel from "../models/proxyModel.js";
+import { checkProxyCurl } from "../utils/domainUtils.js";
+import { setStability } from "../controllers/checkController.js";
+import balanserModel from "../models/balanserModel.js";
+import { exec } from "child_process";
 
 export const startCron = () => {
-  console.log('Крон запущен 🚀');
-
-  cron.schedule('*/15 * * * *', () => {
-    console.log('Проверка доменов каждые 15 минут 🚀');
-    // chekLinks();
-  });
-  cron.schedule('*/15 * * * *', () => {
-    console.log('Проверка прокси каждые 15 минут 🚀');
-    // checkAllProxies();
+  console.log("Крон запущен 🚀");
+  cron.schedule("*/15 * * * *", () => {
+    console.log("Проверка доменов каждые 15 минут 🚀");
+    chekLinks();
   });
 
-  cron.schedule('0 */3 * * *', () => {
-    console.log('Проверка реестров каждые 3 часа 🚀');
-    // checkReestr();
+  cron.schedule("*/15 * * * *", () => {
+    console.log("Проверка прокси каждые 15 минут 🚀");
+    checkAllProxies();
+  });
+  cron.schedule("0 */3 * * *", () => {
+    console.log("Проверка реестров каждые 3 часа 🚀");
+    checkReestr();
   });
 };
 
@@ -31,63 +28,72 @@ const sendLogToChat = async (token, chat_id, data) => {
     `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chat_id}&text=${data}
     `,
     {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'content-type': 'application/json',
+        "content-type": "application/json",
       },
     }
   );
 };
 
-const chekLinks = async () => {
-  const { activeDomains } = await domainModel.findOne({ _id: MODEL_ID });
-
-  if (!activeDomains.length) return;
-  checkDomainViaProxy(activeDomains);
+export const chekLinks = async () => {
+  console.log(1);
+  const domains = await domainModel.find();
+  if (!domains.length) return;
+  for (const domain of domains) {
+    await checkDomainViaProxy(domain);
+  }
 };
 
-async function checkDomainViaProxy(siteUrls) {
-  if (!siteUrls || !Array.isArray(siteUrls) || siteUrls.length === 0) {
-    console.log('Нужно передать siteUrls — массив ссылок');
+async function checkDomainViaProxy(domainDoc) {
+  if (!domainDoc || !domainDoc.domain) {
+    console.log("❌ Неверный объект домена");
     return;
   }
 
-  const proxies = await proxyModel.find({ type: 'http' });
-  const results = {};
-
-  for (const siteUrl of siteUrls) {
-    results[siteUrl] = [];
-
-    for (let i = 0; i < proxies.length; i++) {
-      const proxyObj = proxies[i];
-      console.log(
-        `🔍 Проверка ${siteUrl.domain} через ${proxyObj.proxyType} (${i + 1}/${
-          proxies.length
-        })`
-      );
-
-      const proxyResult = await checkProxyCurl(siteUrl.domain, proxyObj);
-
-      await setStability(
-        proxyResult.error ? 'decrease' : 'increase',
-        siteUrl.domain,
-        proxyObj.proxyType
-      );
-    }
+  const proxies = await proxyModel.find({ type: "http" });
+  if (!proxies.length) {
+    console.log("⚠️ Нет доступных прокси для проверки");
+    return;
   }
-  console.log('checkDomainViaProxy --- finish');
+
+  console.log(`\n🌐 Проверка домена: ${domainDoc.domain}`);
+
+  for (let i = 0; i < proxies.length; i++) {
+    const proxyObj = proxies[i];
+    const proxyName = proxyObj.proxyType; // или proxyObj.host, если нужно уникально
+
+    console.log(`🔍 Проверка через ${proxyName} (${i + 1}/${proxies.length})`);
+
+    const proxyResult = await checkProxyCurl(domainDoc.domain, proxyObj);
+
+    // определяем результат проверки
+    const success = !proxyResult.error;
+    const action = success ? "increase" : "decrease";
+
+    // вызываем контроллер обновления стабильности
+    await setStability(action, domainDoc.domain, proxyName);
+
+    console.log(
+      `📊 ${domainDoc.domain} — ${proxyName} → ${
+        success ? "✅ success" : "❌ failed"
+      }`
+    );
+  }
+
+  console.log(`✅ Проверка завершена: ${domainDoc.domain}`);
 }
+
 export const checkReestr = async () => {
   try {
-    console.log('🔍 Начинаем проверку реестра...');
+    console.log("🔍 Начинаем проверку реестра...");
 
     // --- Получаем все домены и балансеры ---
     const domainDocs = await domainModel.find();
     const balansers = await balanserModel.find();
-    console.log(balansers);
     // --- Проверка доменов ---
     const domainResponse = await fetch(
-      'https://reestr.rublacklist.net/api/v3/domains/'
+      "https://reestr.rublacklist.net/api/v3/domains/"
     );
     if (!domainResponse.ok) {
       console.error(
@@ -113,7 +119,7 @@ export const checkReestr = async () => {
 
     // --- Проверка IP ---
     const ipResponse = await fetch(
-      'https://reestr.rublacklist.net/api/v3/ips/'
+      "https://reestr.rublacklist.net/api/v3/ips/"
     );
     if (!ipResponse.ok) {
       console.error(
@@ -134,9 +140,9 @@ export const checkReestr = async () => {
       }
     }
 
-    console.log('✅ Проверка реестра завершена успешно');
+    console.log("✅ Проверка реестра завершена успешно");
   } catch (error) {
-    console.error('🔥 Ошибка при проверке реестра:', error);
+    console.error("🔥 Ошибка при проверке реестра:", error);
   }
 };
 
@@ -155,22 +161,22 @@ const checkSingleProxy = (proxyObj) => {
       externalIp: null,
     };
 
-    if (type !== 'http') {
-      result.error = 'Only HTTP proxies supported for now';
+    if (type !== "http") {
+      result.error = "Only HTTP proxies supported for now";
       return resolve(result);
     }
 
     const proxy = `http://${user}:${pass}@${host}:${port}`;
-    const testUrl = 'https://api.ipify.org'; // отдаёт только IP
+    const testUrl = "https://api.ipify.org"; // отдаёт только IP
 
     const curlCommand = [
-      'curl',
+      "curl",
       `--proxy ${proxy}`,
-      '--connect-timeout 15',
-      '--max-time 15',
-      '-s',
+      "--connect-timeout 15",
+      "--max-time 15",
+      "-s",
       testUrl,
-    ].join(' ');
+    ].join(" ");
 
     const startTime = Date.now();
 
@@ -182,12 +188,12 @@ const checkSingleProxy = (proxyObj) => {
           result.responseTimeMs = Date.now() - startTime;
 
           if (err || !stdout) {
-            result.error = stderr || err?.message || 'No response';
+            result.error = stderr || err?.message || "No response";
 
             // ⚠️ Отправляем лог только при ошибке проверки
             sendLogToChat(
               process.env.TG_TOKEN,
-              '-1002867546772',
+              "-1002867546772",
               `❌ Ошибка проверки прокси ${host}:${port}\n${result.error}`
             );
 
@@ -201,12 +207,12 @@ const checkSingleProxy = (proxyObj) => {
       );
     } catch (e) {
       result.responseTimeMs = Date.now() - startTime;
-      result.error = e.message || 'Unknown exec error';
+      result.error = e.message || "Unknown exec error";
 
       // ⚠️ Логируем критическую ошибку
       sendLogToChat(
         process.env.TG_TOKEN,
-        '-1002867546772',
+        "-1002867546772",
         `❌ Критическая ошибка exec при проверке ${host}:${port}\n${result.error}`
       );
 

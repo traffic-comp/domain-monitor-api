@@ -5,6 +5,8 @@ export const get = async (req, res) => {
   try {
     const balansers = await balanserModel.find();
 
+
+    console.log(balansers);
     if (!balansers.length) {
       return res.status(404).json({ error: 'Балансеры не найдены' });
     }

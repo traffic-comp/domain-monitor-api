@@ -24,6 +24,8 @@ app.use("/balanser", balanserRoutes);
 app.use("/proxy", proxyRoutes);
 app.use("/kt", ktRoutes);
 
+
+
 mongoose
   .connect(process.env.MOGO_URI, {})
   .then(() => console.log("MongoDB connected"))
